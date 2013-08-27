@@ -1,6 +1,10 @@
-#include <stdio.h>
-#include "serialib.h"
 #include <exception>
+#include <sstream>
+
+#include <stdio.h>
+
+#include "serialib.h"
+
 
 #include <cmath>
 
@@ -11,6 +15,53 @@
 #ifdef __linux__
 #define DEVICE_PORT "/dev/ttyUSB0"                         // ttyS0 for linux
 #endif
+
+#define ERR_OK 0
+#define ERR_DBG -10
+#define ERR_GOTREADING -11
+
+char hexToChar (char buf)
+{
+	char ret = 0;
+	if (buf >= '0' && buf <= '9')
+	{
+		ret = buf - '0';
+	}
+	else if (buf >= 'A' && buf <= 'F')
+	{
+		ret = buf - 'A' + 10;
+	}
+	
+	return ret;	
+}
+
+char hexCharsToChar(char *buf)
+{
+	char ret = 0; 
+	
+	char MSBS;
+	char LSBS;
+	MSBS = hexToChar(buf[0]);
+	LSBS = hexToChar(buf[1]);
+	
+	MSBS = MSBS << 4;
+	
+	ret = MSBS|LSBS;
+}
+
+double hexCharsToDouble(char *buf)
+{
+	double res = 0;
+	char *retBuf = (char *) &res;
+	
+	for (int i=0; i<sizeof(double); i++)
+	{
+		*(retBuf + i)  = hexCharsToChar(buf + i*2);
+	}
+	
+	return res;	
+}
+
 
 struct readingsType
 {
@@ -57,27 +108,33 @@ public:
 		return serial.WriteString(str.c_str());
     }
     
-    int getReading(std::string &reading)
+    int getReading(readingsType &reading)
     {
 		const int timeout = 5000;
 		int ret = serial.ReadString(buffer, '\n', sizeof(buffer), timeout);
-		reading = std::string(buffer);
-		return ret;
-	}
-	int getReading(struct readingsType& readings)
-	{
-		const int timeout = 5000;
-		int ret = serial.ReadString(buffer, '\n', sizeof(buffer), timeout);		
-		readings = *((struct readingsType*) buffer);
 		
-		return ret;		
-	}
-	int getReading(char *buf)
-	{
-		const int timeout = 5000;
-		int ret = serial.Read(buffer, sizeof(buffer), timeout);
-		strcpy(buf, buffer);
-		return ret;
+		//get rid of error cases
+		if (ret <= 0)
+			return ret;
+		
+		//catch debug messages (debug messages do not begin or end with start of message)
+		if (buffer[0] != 0x02 && buffer[sizeof(double)*2*7+1] != 0x03) //start of message, end of message
+		{
+			std::cout << "RPi_DBG: " << buffer;
+			return ERR_DBG;
+		}
+		
+		char *readingStart = buffer+1;
+		
+		for (int i=0; i<ret/sizeof(double)/2; i++)
+		{
+			char b[17] = {0};		
+			memcpy(b, readingStart+16*i, 16);					
+			
+			*((double*)&reading + i) = hexCharsToDouble(b);
+		}
+		
+		return ERR_GOTREADING;
 	}
 };
 
@@ -94,46 +151,18 @@ int main()
     
 	while(1){
 		// Read a string from the serial device
-		std::string reading;
-		//struct readingsType reading;
+		//std::string reading;
+		struct readingsType reading;
 		int ret = rpi_mpu_dev->getReading(reading);
 		
-		if (ret>0)
+		if (ret == ERR_GOTREADING)
 		{
-			/*std::cout << "read: " << reading.length();
-			//std::cout << " String read from serial port : aX " << reading.accelX << " aY " << reading.accelY << " aZ " << reading.accelZ << "\n";
-			std::cout << " String read from serial port : " << reading << "\n";
+			std::cout << "String read from serial port : aX " << reading.accelX << " aY " << reading.accelY << " aZ " << reading.accelZ << " temp " << \
+				reading.temp << " gX " << reading.gyroX << " gY " << reading.gyroY << " gZ " << reading.gyroZ << "\n";
 			
-			std::cout << "dbg: ";
-			char buf[500];
-			char chunk[500];
-			buf[0] = '\0';
-		
-			sprintf(buf, "%2X\n", reading.c_str());
-			
-			for (int i=0; i<reading.length(); i++)
-			{
-				if (!(i%8))
-				{
-					printf("%s\n", buf);
-					buf[0] = '\0';
-				}
-				sprintf(chunk, "%2X", reading[i]);
-				strcat(buf, chunk);
-			}
-			if (buf[0] != '\0')
-				printf("%s\n", buf);
-			std::cout << ": dbg2\n";*/
-			char str[500];
-			char buffer[500];
-			int numBytes = rpi_mpu_dev->getReading(buffer);
-			buffer[numBytes] = '\0';
-			printf("numBytes: %d msg: %s\n", numBytes, buffer);
-			
-			sprintf(str, "%2X\n", buffer);
-			printf("%s\n", str);
+			printf("\n");			
 		}	
-		else
+		else if (ret != ERR_DBG)
 			std::cout << "TimeOut reached. No data received!\n";
 	}
     
