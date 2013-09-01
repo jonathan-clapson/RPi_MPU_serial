@@ -1,10 +1,10 @@
 #include <exception>
 #include <sstream>
+#include <iomanip>
 
 #include <stdio.h>
 
 #include "serialib.h"
-
 
 #include <cmath>
 
@@ -19,6 +19,17 @@
 #define ERR_OK 0
 #define ERR_DBG -10
 #define ERR_GOTREADING -11
+
+struct reading_memory_type {
+	double a_x, a_y, a_z;
+	double temp;
+	double w_x, w_y, w_z;
+	
+	double x,y,z;
+	double v_x, v_y, v_z;
+	
+	double o_x, o_y, o_z;	
+};
 
 char hexToChar (char buf)
 {
@@ -63,23 +74,13 @@ double hexCharsToDouble(char *buf)
 }
 
 
-struct readingsType
-{
-	double_t accelX;
-	double_t accelY;
-	double_t accelZ;
-	double_t temp;
-	double_t gyroX;
-	double_t gyroY;
-	double_t gyroZ;	
-};
 
 //should make this class run in another probably multiple threads
 class rpi_mpu_io
 {
 	serialib serial;
 	bool connectionValid;
-	char buffer[256];
+	char buffer[2000];
 
 public:	
 	rpi_mpu_io ( char *device, int baud )
@@ -108,7 +109,7 @@ public:
 		return serial.WriteString(str.c_str());
     }
     
-    int getReading(readingsType &reading)
+    int getReading(struct reading_memory_type *reading)
     {
 		const int timeout = 5000;
 		int ret = serial.ReadString(buffer, '\n', sizeof(buffer), timeout);
@@ -117,21 +118,31 @@ public:
 		if (ret <= 0)
 			return ret;
 		
+		int num_faces = buffer[1];
+		
 		//catch debug messages (debug messages do not begin or end with start of message)
-		if (buffer[0] != 0x02 && buffer[sizeof(double)*2*7+1] != 0x03) //start of message, end of message
+		//FIXME: this should probably check for byte alignment too ie is divisable by 8
+		if (buffer[0] != 0x02 || buffer[ret-3] != 0x03) //start of message, end of message
 		{
 			std::cout << "RPi_DBG: " << buffer;
 			return ERR_DBG;
 		}
 		
-		char *readingStart = buffer+1;
+		char *readingStart = buffer+2;
 		
-		for (int i=0; i<ret/sizeof(double)/2; i++)
+		//number of iterations is number of faces * number of doubles in a sensor reading set
+		int num_iters = num_faces*sizeof(reading_memory_type)/sizeof(double);
+		for (int i=0; i<num_iters; i++)
 		{
-			char b[17] = {0};		
-			memcpy(b, readingStart+16*i, 16);					
+			/* overwrites the first 16 bytes of the hex value with the ascii hex, last byte is 0 (from allocation)
+			 * this allows c based string functions to print the ascii hex for debugging
+			 */
+			char message_iter_buffer[17] = {0};		
+			memcpy(message_iter_buffer, readingStart+16*i, 16);
 			
-			*((double*)&reading + i) = hexCharsToDouble(b);
+			//printf("message_iter_buffer: %s\n", message_iter_buffer);
+			
+			*((double*)reading + i) = hexCharsToDouble(message_iter_buffer);
 		}
 		
 		return ERR_GOTREADING;
@@ -152,15 +163,27 @@ int main()
 	while(1){
 		// Read a string from the serial device
 		//std::string reading;
-		struct readingsType reading;
-		int ret = rpi_mpu_dev->getReading(reading);
+		
+		//FIXME: hard code for 6 readings 
+		struct reading_memory_type readings[6];
+		
+		int ret = rpi_mpu_dev->getReading(readings);
+		
+		/*std::cout.setf(std::ios::fixed, std::ios::floatfield);
+		std::cout.setf(std::ios::showpoint);*/
 		
 		if (ret == ERR_GOTREADING)
 		{
-			std::cout << "String read from serial port : aX " << reading.accelX << " aY " << reading.accelY << " aZ " << reading.accelZ << " temp " << \
-				reading.temp << " gX " << reading.gyroX << " gY " << reading.gyroY << " gZ " << reading.gyroZ << "\n";
-			
-			printf("\n");			
+			for (int i=0; i<1; i++)
+			{
+				//std::cout << "RPi_Dev" << i << ": x " << std::setprecision(2) << std::setw(8) << readings[i].x << " y " << readings[i].y << " z " << readings[i].z << 
+				std::cout << "RPi_Dev" << i << ": x " << readings[i].x << " y " << readings[i].y << " z " << readings[i].z << \
+				" vx " << readings[i].v_x << " vy " << readings[i].v_y << " vz " << readings[i].v_z << \
+				" ax " << readings[i].a_x << " ay " << readings[i].a_y << " az " << readings[i].a_z << \
+				" temp " << readings[i].temp << \
+				" ox " << readings[i].o_x << " oy " << readings[i].o_y << " oz " << readings[i].o_z << \
+				" wx " << readings[i].w_x << " wy " << readings[i].w_y << " wz " << readings[i].w_z << std::endl;
+			}			
 		}	
 		else if (ret != ERR_DBG)
 			std::cout << "TimeOut reached. No data received!\n";
