@@ -3,10 +3,12 @@
 #include <iomanip>
 
 #include <stdio.h>
+#include <cmath>
 
 #include "serialib.h"
 
-#include <cmath>
+#include "input.h"
+
 
 #if defined (_WIN32) || defined( _WIN64)
 #define DEVICE_PORT "COM1"                               // COM1 for windows
@@ -111,7 +113,7 @@ public:
     
     int getReading(struct reading_memory_type *reading)
     {
-		const int timeout = 5000;
+		const int timeout = 500;
 		int ret = serial.ReadString(buffer, '\n', sizeof(buffer), timeout);
 		
 		//get rid of error cases
@@ -130,6 +132,7 @@ public:
 		
 		char *readingStart = buffer+2;
 		
+		
 		//number of iterations is number of faces * number of doubles in a sensor reading set
 		int num_iters = num_faces*sizeof(reading_memory_type)/sizeof(double);
 		for (int i=0; i<num_iters; i++)
@@ -139,6 +142,7 @@ public:
 			 */
 			char message_iter_buffer[17] = {0};		
 			memcpy(message_iter_buffer, readingStart+16*i, 16);
+			printf("buf%d: %s\n", i,message_iter_buffer);
 			
 			//printf("message_iter_buffer: %s\n", message_iter_buffer);
 			
@@ -151,6 +155,10 @@ public:
 
 int main()
 {
+	pthread_t read_thread;
+	struct read_message_type r_msg;
+	spawn_input_thread(&read_thread, &r_msg);
+	
     // Open serial port device
     rpi_mpu_io* rpi_mpu_dev = new rpi_mpu_io((char *)DEVICE_PORT, 115200);
     if (!rpi_mpu_dev->device_valid())
@@ -160,21 +168,21 @@ int main()
 	}
     printf ("Serial port opened successfully!\n");
     
-	while(1){
-		// Read a string from the serial device
-		//std::string reading;
-		
+	while(1){		
 		//FIXME: hard code for 6 readings 
 		struct reading_memory_type readings[6];
 		
 		int ret = rpi_mpu_dev->getReading(readings);
 		
-		/*std::cout.setf(std::ios::fixed, std::ios::floatfield);
-		std::cout.setf(std::ios::showpoint);*/
+		if (r_msg.message_valid)
+		{
+			rpi_mpu_dev->writeString(r_msg.message);
+			r_msg.message_valid = 0;			
+		}
 		
 		if (ret == ERR_GOTREADING)
 		{
-			for (int i=0; i<1; i++)
+			for (int i=0; i<6; i++)
 			{
 				//std::cout << "RPi_Dev" << i << ": x " << std::setprecision(2) << std::setw(8) << readings[i].x << " y " << readings[i].y << " z " << readings[i].z << 
 				std::cout << "RPi_Dev" << i << ": x " << readings[i].x << " y " << readings[i].y << " z " << readings[i].z << \
@@ -185,9 +193,11 @@ int main()
 				" wx " << readings[i].w_x << " wy " << readings[i].w_y << " wz " << readings[i].w_z << std::endl;
 			}			
 		}	
-		else if (ret != ERR_DBG)
-			std::cout << "TimeOut reached. No data received!\n";
+		/*else if (ret != ERR_DBG)
+			std::cout << "TimeOut reached. No data received!\n";*/
 	}
+	
+	end_input_thread(&read_thread, &r_msg);
     
     delete rpi_mpu_dev;
 
