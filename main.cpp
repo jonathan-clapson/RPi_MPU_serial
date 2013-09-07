@@ -13,11 +13,11 @@
 #include "support.h"
 
 #if defined (_WIN32) || defined( _WIN64)
-#define DEVICE_PORT "COM1"                               // COM1 for windows
+#define DEVICE_PORT "COM1"			// COM1 for windows
 #endif
 
 #ifdef __linux__
-#define DEVICE_PORT "/dev/ttyUSB0"                         // ttyS0 for linux
+#define DEVICE_PORT "/dev/ttyUSB0"	// ttyS0 for linux
 #endif
 
 /* yeah globals a bit dodge, but it seemed cleaner than pushing it round everywhere */
@@ -125,13 +125,10 @@ int main()
 		if (fp)
 		{
 			for (int i=0; i<6; i++)
-				fprintf(fp, "%d,%6.0f,%6.0f,%6.0f,\
-					%6.0f,%6.0f,%6.0f,\
-					%6.0f,%6.0f,%6.0f,\
-					%6.0f,\
-					%6.0f,%6.0f,%6.0f,\
-					%6.0f,%6.0f,%6.0f",
-					i, readings[i].x, readings[i].y, readings[i].z, 
+				fprintf(fp, "RPi_Dev%d: ts %ld x %6.0f y %6.0f z %6.0f vx %6.0f vy %6.0f vz %6.0f ax %6.0f ay %6.0f az %6.0f temp %6.0f ox %6.0f oy %6.0f oz %6.0f wx %6.0f wy %6.0f wz %6.0f\n",
+					i,
+					readings[i].timestamp,
+					readings[i].x, readings[i].y, readings[i].z, 
 					readings[i].v_x, readings[i].v_y, readings[i].v_z,
 					readings[i].a_x, readings[i].a_y, readings[i].a_z,
 					readings[i].temp,
@@ -147,8 +144,10 @@ int main()
 			for (int i=0; i<6; i++) 
 			{
 				//std::cout << "RPi_Dev" << i << ": x " << std::setprecision(2) << std::setw(8) << readings[i].x << " y " << readings[i].y << " z " << readings[i].z << 
-				print("RPi_Dev%d: x %6.0f y %6.0f z %6.0f vx %6.0f vy %6.0f vz %6.0f ax %6.0f ay %6.0f az %6.0f temp %6.0f ox %6.0f oy %6.0f oz %6.0f wx %6.0f wy %6.0f wz %6.0f\n",
-					i, readings[i].x, readings[i].y, readings[i].z, 
+				print("RPi_Dev%d: ts %ld x %6.0f y %6.0f z %6.0f vx %6.0f vy %6.0f vz %6.0f ax %6.0f ay %6.0f az %6.0f temp %6.0f ox %6.0f oy %6.0f oz %6.0f wx %6.0f wy %6.0f wz %6.0f\n",
+					i,
+					readings[i].timestamp,
+					readings[i].x, readings[i].y, readings[i].z, 
 					readings[i].v_x, readings[i].v_y, readings[i].v_z,
 					readings[i].a_x, readings[i].a_y, readings[i].a_z,
 					readings[i].temp,

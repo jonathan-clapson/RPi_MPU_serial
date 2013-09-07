@@ -4,6 +4,11 @@
 #include "serialib.h"
 
 struct reading_memory_type {
+	/*
+	 * timestamp is a long int to keep 8byte alignment
+	 * it may be actually useful if the 64bit timer read function is used
+	 */
+	long int timestamp;
 	double a_x, a_y, a_z;
 	double temp;
 	double w_x, w_y, w_z;
