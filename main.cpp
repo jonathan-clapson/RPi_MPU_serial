@@ -7,8 +7,10 @@
 
 #include "serialib.h"
 
+#include "rpi_mpu_io.h"
 #include "input.h"
-
+#include "error.h"
+#include "support.h"
 
 #if defined (_WIN32) || defined( _WIN64)
 #define DEVICE_PORT "COM1"                               // COM1 for windows
@@ -18,187 +20,149 @@
 #define DEVICE_PORT "/dev/ttyUSB0"                         // ttyS0 for linux
 #endif
 
-#define ERR_OK 0
-#define ERR_DBG -10
-#define ERR_GOTREADING -11
+/* yeah globals a bit dodge, but it seemed cleaner than pushing it round everywhere */
+rpi_mpu_io* rpi_mpu_dev;
+bool record_readings = 0;
+bool main_loop_exit = false;
 
-struct reading_memory_type {
-	double a_x, a_y, a_z;
-	double temp;
-	double w_x, w_y, w_z;
-	
-	double x,y,z;
-	double v_x, v_y, v_z;
-	
-	double o_x, o_y, o_z;	
+const char *command_table[] = {
+	"quit",
+	"dumpcalibration",
+	"recordreadings",
+	NULL
 };
-
-char hexToChar (char buf)
-{
-	char ret = 0;
-	if (buf >= '0' && buf <= '9')
+	
+void process_internal_command (char *message)
+{	
+	//get command
+	char *command = strtok(message, " ");
+	
+	int command_num = 0;
+	while (command_table[command_num])
 	{
-		ret = buf - '0';
-	}
-	else if (buf >= 'A' && buf <= 'F')
-	{
-		ret = buf - 'A' + 10;
+		if (strcmp(command, command_table[command_num]) == 0)
+			break;			
+		command_num++;		
 	}
 	
-	return ret;	
+	char *arg = strtok(NULL, " ");
+
+	switch (command_num)
+	{
+		case 0: /* quit */
+			main_loop_exit = true;
+			break;
+		case 1: /* dump calibration */
+			if (arg)
+				rpi_mpu_dev->enable_calibration_dump(std::string(arg));
+			else
+				rpi_mpu_dev->enable_calibration_dump();
+			break;
+		case 2: /* record readings */
+			record_readings = !record_readings;			
+		default:
+			break;		
+	}
 }
-
-char hexCharsToChar(char *buf)
-{
-	char ret = 0; 
-	
-	char MSBS;
-	char LSBS;
-	MSBS = hexToChar(buf[0]);
-	LSBS = hexToChar(buf[1]);
-	
-	MSBS = MSBS << 4;
-	
-	ret = MSBS|LSBS;
-}
-
-double hexCharsToDouble(char *buf)
-{
-	double res = 0;
-	char *retBuf = (char *) &res;
-	
-	for (int i=0; i<sizeof(double); i++)
-	{
-		*(retBuf + i)  = hexCharsToChar(buf + i*2);
-	}
-	
-	return res;	
-}
-
-
-
-//should make this class run in another probably multiple threads
-class rpi_mpu_io
-{
-	serialib serial;
-	bool connectionValid;
-	char buffer[2000];
-
-public:	
-	rpi_mpu_io ( char *device, int baud )
-	: connectionValid(true)
-	{
-		int ret = serial.Open( device, baud );
-		
-		if ( ret != 1 ) {
-			std::cout << "Could not open serial device\n";
-			connectionValid = false;
-		}			
-	}
-	
-	~rpi_mpu_io ( )
-	{
-		serial.Close();
-	}
-	
-	bool device_valid ( void ) {
-		return connectionValid;
-	}
-	
-	//write to serial port
-	int writeString (std::string str)
-	{
-		return serial.WriteString(str.c_str());
-    }
-    
-    int getReading(struct reading_memory_type *reading)
-    {
-		const int timeout = 500;
-		int ret = serial.ReadString(buffer, '\n', sizeof(buffer), timeout);
-		
-		//get rid of error cases
-		if (ret <= 0)
-			return ret;
-		
-		int num_faces = buffer[1];
-		
-		//catch debug messages (debug messages do not begin or end with start of message)
-		//FIXME: this should probably check for byte alignment too ie is divisable by 8
-		if (buffer[0] != 0x02 || buffer[ret-3] != 0x03) //start of message, end of message
-		{
-			std::cout << "RPi_DBG: " << buffer;
-			return ERR_DBG;
-		}
-		
-		char *readingStart = buffer+2;
-		
-		
-		//number of iterations is number of faces * number of doubles in a sensor reading set
-		int num_iters = num_faces*sizeof(reading_memory_type)/sizeof(double);
-		for (int i=0; i<num_iters; i++)
-		{
-			/* overwrites the first 16 bytes of the hex value with the ascii hex, last byte is 0 (from allocation)
-			 * this allows c based string functions to print the ascii hex for debugging
-			 */
-			char message_iter_buffer[17] = {0};		
-			memcpy(message_iter_buffer, readingStart+16*i, 16);
-			printf("buf%d: %s\n", i,message_iter_buffer);
-			
-			//printf("message_iter_buffer: %s\n", message_iter_buffer);
-			
-			*((double*)reading + i) = hexCharsToDouble(message_iter_buffer);
-		}
-		
-		return ERR_GOTREADING;
-	}
-};
 
 int main()
 {
-	pthread_t read_thread;
-	struct read_message_type r_msg;
-	spawn_input_thread(&read_thread, &r_msg);
+	FILE *fp = NULL;
 	
+    rpi_mpu_dev = new rpi_mpu_io((char *)DEVICE_PORT, 2000000);
     // Open serial port device
-    rpi_mpu_io* rpi_mpu_dev = new rpi_mpu_io((char *)DEVICE_PORT, 115200);
-    if (!rpi_mpu_dev->device_valid())
-	{
+    if (!rpi_mpu_dev->device_valid()) 
+    {
 		delete rpi_mpu_dev;
 		return -1;
 	}
     printf ("Serial port opened successfully!\n");
     
-	while(1){		
-		//FIXME: hard code for 6 readings 
+	disable_line_buffering();
+    write_allowed = true;
+    
+	while(!main_loop_exit){		
+		//FIXME: hard coded for 6 readings 
 		struct reading_memory_type readings[6];
+		
+		if (input_available())
+		{
+			write_allowed = false;
+		
+			char input_buf[201]; //1 more for appending '\n'
+			fgets(input_buf, 200, stdin);
+			if (input_buf[0] == ';')
+			{
+				input_buf[strlen(input_buf) -1] = '\0';
+				process_internal_command(input_buf + 1);				
+			}
+			else
+			{
+				strcat(input_buf, "\n");
+				rpi_mpu_dev->writeString(input_buf);				
+			}
+		}
+		write_allowed = true;
 		
 		int ret = rpi_mpu_dev->getReading(readings);
 		
-		if (r_msg.message_valid)
+		//enable/disable csv file export
+		if (!fp && record_readings == true)
 		{
-			rpi_mpu_dev->writeString(r_msg.message);
-			r_msg.message_valid = 0;			
+			//FIXME: hard coded file name
+			printf("opening file\n");
+			fp = fopen("reading_record.csv", "w");
+			for (int i=0; i<6; i++)
+				fprintf(fp, "RPi_Dev,x,y,z,vx,vy,vz,ax,ay,az,temp,ox,oy,oz,wx,wy,wz");
+			fprintf(fp, "\n");
 		}
+		if (fp && record_readings == false)
+		{
+			printf("closing file\n");
+			fclose(fp);
+		}		
 		
-		if (ret == ERR_GOTREADING)
+		if (fp)
 		{
 			for (int i=0; i<6; i++)
+				fprintf(fp, "%d,%6.0f,%6.0f,%6.0f,\
+					%6.0f,%6.0f,%6.0f,\
+					%6.0f,%6.0f,%6.0f,\
+					%6.0f,\
+					%6.0f,%6.0f,%6.0f,\
+					%6.0f,%6.0f,%6.0f",
+					i, readings[i].x, readings[i].y, readings[i].z, 
+					readings[i].v_x, readings[i].v_y, readings[i].v_z,
+					readings[i].a_x, readings[i].a_y, readings[i].a_z,
+					readings[i].temp,
+					readings[i].o_x, readings[i].o_y, readings[i].o_z,
+					readings[i].w_x, readings[i].w_y, readings[i].w_z);
+			
+			fprintf(fp, "\n");
+		}
+		
+		//show readings
+		if (ret == ERR_GOTREADING) 
+		{
+			for (int i=0; i<6; i++) 
 			{
 				//std::cout << "RPi_Dev" << i << ": x " << std::setprecision(2) << std::setw(8) << readings[i].x << " y " << readings[i].y << " z " << readings[i].z << 
-				std::cout << "RPi_Dev" << i << ": x " << readings[i].x << " y " << readings[i].y << " z " << readings[i].z << \
-				" vx " << readings[i].v_x << " vy " << readings[i].v_y << " vz " << readings[i].v_z << \
-				" ax " << readings[i].a_x << " ay " << readings[i].a_y << " az " << readings[i].a_z << \
-				" temp " << readings[i].temp << \
-				" ox " << readings[i].o_x << " oy " << readings[i].o_y << " oz " << readings[i].o_z << \
-				" wx " << readings[i].w_x << " wy " << readings[i].w_y << " wz " << readings[i].w_z << std::endl;
+				print("RPi_Dev%d: x %6.0f y %6.0f z %6.0f vx %6.0f vy %6.0f vz %6.0f ax %6.0f ay %6.0f az %6.0f temp %6.0f ox %6.0f oy %6.0f oz %6.0f wx %6.0f wy %6.0f wz %6.0f\n",
+					i, readings[i].x, readings[i].y, readings[i].z, 
+					readings[i].v_x, readings[i].v_y, readings[i].v_z,
+					readings[i].a_x, readings[i].a_y, readings[i].a_z,
+					readings[i].temp,
+					readings[i].o_x, readings[i].o_y, readings[i].o_z,
+					readings[i].w_x, readings[i].w_y, readings[i].w_z);
 			}			
 		}	
 		/*else if (ret != ERR_DBG)
 			std::cout << "TimeOut reached. No data received!\n";*/
 	}
 	
-	end_input_thread(&read_thread, &r_msg);
-    
+	if (fp)
+		fclose(fp);
+   
     delete rpi_mpu_dev;
 
     return 0;

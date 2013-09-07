@@ -6,8 +6,9 @@
 #define message_size 200
 
 struct read_message_type {
-	int message_valid;
-	int end_thread;
+	bool message_valid;
+	bool end_thread;
+	bool receiving;
 	char message[message_size];
 };
 

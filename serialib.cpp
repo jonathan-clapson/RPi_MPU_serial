@@ -166,6 +166,21 @@ char serialib::Open(const char *Device,const unsigned int Bauds)
     case 38400 :    Speed=B38400; break;
     case 57600 :    Speed=B57600; break;
     case 115200 :   Speed=B115200; break;
+    	
+	case 230400 : Speed=B230400; break;
+	case 460800 : Speed=B460800; break;
+	case 500000 : Speed=B500000; break;
+	case 576000 : Speed=B576000; break;
+	case 921600 : Speed=B921600; break;
+	case 1000000 : Speed=B1000000; break;
+	case 1152000 : Speed=B1152000; break;
+	case 1500000 : Speed=B1500000; break;
+	case 2000000 : Speed=B2000000; break;
+	case 2500000 : Speed=B2500000; break;
+	case 3000000 : Speed=B3000000; break;
+	case 3500000 : Speed=B3500000; break;
+	case 4000000 : Speed=B4000000; break;
+    
     default : return -4;
 }
     cfsetispeed(&options, Speed);                                       // Set the baud rate at 115200 bauds
