@@ -18,22 +18,23 @@ bool input_available()
 
 bool write_allowed = true;
 int print(const char* fmt, ...){
-	int retval=0;
+	int ret_val=0;
 
 	va_list ap;
 	va_start(ap, fmt);
 
 	if (write_allowed)
-		retval = vprintf(fmt, ap);
+		ret_val = vprintf(fmt, ap);
 
 	va_end(ap);
+	
+	return ret_val;
 }
 
 struct termios old_tio;
 void disable_line_buffering()
 {
 	struct termios new_tio;
-	unsigned char c;
 
 	/* get the terminal settings for stdin */
 	tcgetattr(STDIN_FILENO,&old_tio);

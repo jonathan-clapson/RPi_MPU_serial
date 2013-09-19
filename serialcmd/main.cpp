@@ -125,7 +125,8 @@ int main()
 		if (fp)
 		{
 			for (int i=0; i<6; i++)
-				fprintf(fp, "%d,%ld,%6.0f,%6.0f,%6.0f,%6.0f,%6.0f,%6.0f,%6.0f,%6.0f,%6.0f,%6.0f,%6.0f,%6.0f,%6.0f,%6.0f,%6.0f,%6.0f,",
+				//fprintf(fp, "%d,%ld,%6.0f,%6.0f,%6.0f,%6.0f,%6.0f,%6.0f,%6.0f,%6.0f,%6.0f,%6.0f,%6.0f,%6.0f,%6.0f,%6.0f,%6.0f,%6.0f,",
+				fprintf(fp, "%d,%ld,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,",
 					i,
 					readings[i].timestamp,
 					readings[i].x, readings[i].y, readings[i].z, 
@@ -143,8 +144,8 @@ int main()
 		{
 			for (int i=0; i<6; i++) 
 			{
-				//std::cout << "RPi_Dev" << i << ": x " << std::setprecision(2) << std::setw(8) << readings[i].x << " y " << readings[i].y << " z " << readings[i].z << 
-				print("RPi_Dev%d: ts %ld x %6.0f y %6.0f z %6.0f vx %6.0f vy %6.0f vz %6.0f ax %6.0f ay %6.0f az %6.0f temp %6.0f ox %6.0f oy %6.0f oz %6.0f wx %6.0f wy %6.0f wz %6.0f\n",
+				print("RPi_Dev%d: ts %ld x %7f y %7f z %7f vx %7f vy %7f vz %7f ax %7f ay %7f az %7f temp %7f ox %7f oy %7f oz %7f wx %7f wy %7f wz %7f\n",
+				//print("RPi_Dev%d: ts %ld x %6.0f y %6.0f z %6.0f vx %6.0f vy %6.0f vz %6.0f ax %6.0f ay %6.0f az %6.0f temp %6.0f ox %6.0f oy %6.0f oz %6.0f wx %6.0f wy %6.0f wz %6.0f\n",
 					i,
 					readings[i].timestamp,
 					readings[i].x, readings[i].y, readings[i].z, 
