@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <GL/gl.h>
 #include <GL/glu.h>
+#include <GL/glx.h>
 #include "SDL.h"
 
 #include "error.h"
@@ -33,14 +34,97 @@
 /* This is our SDL surface */
 SDL_Surface *surface; 
 
+/* Font stuff */
+GLuint  base; /* Base Display List For The Font Set */
+GLfloat cnt1; /* 1st Counter Used To Move Text & For Coloring */
+GLfloat cnt2; /* 2nd Counter Used To Move Text & For Coloring */
+
+/* function to recover memory form our list of characters */
+GLvoid KillFont( )
+{
+    glDeleteLists( base, 96 );
+
+    return;
+}
+
 /* function to release/destroy our resources and restoring the old desktop */
 void Quit( int returnCode )
-{
+{	
+	KillFont( );
+	
 	/* clean up the window */
 	SDL_Quit( );
 
 	/* and exit appropriately */
 	exit( returnCode );
+}
+
+/* function to build our font list */
+GLvoid buildFont( )
+{
+    Display *dpy;          /* Our current X display */
+    XFontStruct *fontInfo; /* Our font info */
+
+    /* Sotrage for 96 characters */
+    base = glGenLists( 96 );
+
+    /* Get our current display long enough to get the fonts */
+    dpy = XOpenDisplay( NULL );
+
+    /* Get the font information */
+    fontInfo = XLoadQueryFont( dpy, "-adobe-helvetica-medium-r-normal--18-*-*-*-p-*-iso8859-1" );
+
+    /* If the above font didn't exist try one that should */
+    if ( fontInfo == NULL )
+	{
+	    fontInfo = XLoadQueryFont( dpy, "fixed" );
+	    /* If that font doesn't exist, something is wrong */
+	    if ( fontInfo == NULL )
+		{
+		    fprintf( stderr, "no X font available?\n" );
+		    Quit( 1 );
+		}
+	}
+
+    /* generate the list */
+    glXUseXFont( fontInfo->fid, 32, 96, base );
+
+    /* Recover some memory */
+    XFreeFont( dpy, fontInfo );
+
+    /* close the display now that we're done with it */
+    XCloseDisplay( dpy );
+
+    return;
+}
+
+/* Print our GL text to the screen */
+GLvoid glPrint( const char *fmt, ... )
+{
+    char text[256]; /* Holds our string */
+    va_list ap;     /* Pointer to our list of elements */
+
+    /* If there's no text, do nothing */
+    if ( fmt == NULL )
+	return;
+
+    /* Parses The String For Variables */
+    va_start( ap, fmt );
+      /* Converts Symbols To Actual Numbers */
+      vsprintf( text, fmt, ap );
+    va_end( ap );
+
+    /* Pushes the Display List Bits */
+    glPushAttrib( GL_LIST_BIT );
+
+    /* Sets base character to 32 */
+    glListBase( base - 32 );
+
+    /* Draws the text */
+    glCallLists( strlen( text ), GL_UNSIGNED_BYTE, text );
+
+    /* Pops the Display List Bits */
+    glPopAttrib( );
 }
 
 /* function to reset our viewport after a window resize */
@@ -124,7 +208,9 @@ int initGL( )
 	
 	/* Set The Blending Function For Translucency */
 	glEnable(GL_BLEND);
-	glBlendFunc(GL_SRC_ALPHA,GL_ONE);			
+	glBlendFunc(GL_SRC_ALPHA,GL_ONE);		
+	
+	buildFont( );	
 
 	return( TRUE );
 }
@@ -145,12 +231,9 @@ void glMoveCamera()
 	//glTranslatef(-cx, -cy, -cz)
 }
 
-int drawGLScene( )
+int drawGLScene( struct reading_memory_type *readings )
 {
 	//1gl unit = 1cm
-	
-	/* rotational vars for the triangle and quad, respectively */
-	static GLfloat rquad;
 	
 	/* These are to calculate our fps */
 	static GLint T0     = 0;
@@ -162,11 +245,35 @@ int drawGLScene( )
 	/* Set The Color To Blue One Time Only */
 	//glColor3f( 0.5f, 0.5f, 1.0f);
 	const int DEPTH_SHIFT = 10.0f;
+	const float axes_scale = 120.0f;
 	
 	//draw cube
 	glColor4f(0.9f, 0.9f, 0.0f, 0.3f);
 	glLoadIdentity();
-	glTranslatef(-64.0f, -64.0f, -64.0f);
+	
+	//compute average
+	double o_x = 0;
+	double o_y = 0;
+	double o_z = 0;
+	for (int i=0; i<6; i++)
+	{
+		//skip the top coz its a little bit crazy
+		if (i==4)
+			continue;
+		
+		o_x += readings[i].o_x;
+		o_y += readings[i].o_y;
+		o_z += readings[i].o_z;		
+	}
+	o_x /= 5;
+	o_y /= 5;
+	o_z /= 5;
+	
+	glRotatef( o_x, 1.0f, 0.0f, 0.0f );
+	glRotatef( o_y, 0.0f, 1.0f, 0.0f );
+	glRotatef( o_z, 0.0f, 0.0f, 1.0f );	
+	glTranslatef(-64.0f, -64.0f, -64.0f);	
+	
 	drawCuboid(128.0f, 128.0f, 128.0f);	
 
 	//draw cube outline
@@ -175,43 +282,84 @@ int drawGLScene( )
 	drawCuboid(128.0f, 128.0f, 128.0f);	
 	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);		
 	
-	//draw top axes
-	glLoadIdentity();
-	glTranslatef (512.0f*2.0f/3.0f, 768.0f/3.0f, DEPTH_SHIFT);
-	glRotatef( rquad, 1.0f, 0.0f, 0.0f );
-	drawAxes(128.0f);
-	
 	//draw right axes	
 	glLoadIdentity();
 	glTranslatef(512.0f*2.0f/3.0f, 0.0f, DEPTH_SHIFT);
-	glRotatef(rquad, 1.0f, 0.0f, 0.0f);	
-	drawAxes(128.0f);
+	glRotatef( readings[3].o_x, 1.0f, 0.0f, 0.0f );
+	glRotatef( readings[3].o_y, 0.0f, 1.0f, 0.0f );
+	glRotatef( readings[3].o_z, 0.0f, 0.0f, 1.0f );
+	drawAxes(axes_scale);
+	//draw text
+	glColor4f(1.0f,0.0f,0.0f,1.0f);	
+	glLoadIdentity();
+	glRasterPos2f( 512.0f*2.0f/3.0f, 100.0f );
+	glPrint("Right Face");
+	
+	//draw top axes	
+	glLoadIdentity();
+	glTranslatef(512.0f*2.0f/3.0f, 768.0f/3.0f, DEPTH_SHIFT);
+	glRotatef( readings[4].o_x, 1.0f, 0.0f, 0.0f );
+	glRotatef( readings[4].o_y, 0.0f, 1.0f, 0.0f );
+	glRotatef( readings[4].o_z, 0.0f, 0.0f, 1.0f );
+	drawAxes(axes_scale);
+	//draw text
+	glColor4f(1.0f,0.0f,0.0f,1.0f);	
+	glLoadIdentity();
+	glRasterPos2f( 512.0f*2.0f/3.0f, 768.0f/3.0f+100.0f );
+	glPrint("Top Face");
 	
 	//draw front axes	
 	glLoadIdentity();
-	glTranslatef(512.0f*2.0f/3.0f, -768.0f/3.0f, DEPTH_SHIFT+4.9f);
-	glRotatef(rquad, 1.0f, 0.0f, 0.0f);	
-	drawAxes(128.0f);
+	glTranslatef(512.0f*2.0f/3.0f, -768.0f/3.0f, DEPTH_SHIFT);
+	glRotatef( readings[2].o_x, 1.0f, 0.0f, 0.0f );
+	glRotatef( readings[2].o_y, 0.0f, 1.0f, 0.0f );
+	glRotatef( readings[2].o_z, 0.0f, 0.0f, 1.0f );
+	drawAxes(axes_scale);
+	//draw text
+	glColor4f(1.0f,0.0f,0.0f,1.0f);	
+	glLoadIdentity();
+	glRasterPos2f( 512.0f*2.0f/3.0f, -768.0f/3.0f+100.0f );
+	glPrint("Front Face");
 	
 	//draw bottom axes
 	glLoadIdentity();
 	glTranslatef( -512.0f*2.0f/3.0f, -768.0f/3.0f,DEPTH_SHIFT);
-	glRotatef(rquad, 1.0f, 0.0f, 0.0f);
-	drawAxes(128.0f);
+	glRotatef( readings[0].o_x, 1.0f, 0.0f, 0.0f );
+	glRotatef( readings[0].o_y, 0.0f, 1.0f, 0.0f );
+	glRotatef( readings[0].o_z, 0.0f, 0.0f, 1.0f );
+	drawAxes(axes_scale);
+	//draw text
+	glColor4f(1.0f,0.0f,0.0f,1.0f);	
+	glLoadIdentity();
+	glRasterPos2f( -512.0f*2.0f/3.0f, -768.0f/3.0f+100.0f );
+	glPrint("Bottom Face");
 	
 	//draw left axes	
 	glLoadIdentity();
 	glTranslatef(-512.0f*2.0f/3.0f, 0.0f, DEPTH_SHIFT);
-	glRotatef(rquad, 1.0f, 0.0f, 0.0f);	
-	drawAxes(128.0f);
+	glRotatef( readings[1].o_x, 1.0f, 0.0f, 0.0f );
+	glRotatef( readings[1].o_y, 0.0f, 1.0f, 0.0f );
+	glRotatef( readings[1].o_z, 0.0f, 0.0f, 1.0f );	
+	drawAxes(axes_scale);
+	//draw text
+	glColor4f(1.0f,0.0f,0.0f,1.0f);	
+	glLoadIdentity();
+	glRasterPos2f( -512.0f*2.0f/3.0f, 100.0f );
+	glPrint("Left Face");
 	
 	//draw back axes	
 	glLoadIdentity();
-	glTranslatef(-512.0f*2.0f/3.0f, 768.0f/3.0f, DEPTH_SHIFT-4.9f);
-	glRotatef(rquad, 1.0f, 0.0f, 0.0f);	
-	drawAxes(128.0f);
+	glTranslatef(-512.0f*2.0f/3.0f, 768.0f/3.0f, DEPTH_SHIFT);
+	glRotatef( readings[5].o_x, 1.0f, 0.0f, 0.0f );
+	glRotatef( readings[5].o_y, 0.0f, 1.0f, 0.0f );
+	glRotatef( readings[5].o_z, 0.0f, 0.0f, 1.0f );
+	drawAxes(axes_scale);
+	//draw text
+	glColor4f(1.0f,0.0f,0.0f,1.0f);	
+	glLoadIdentity();
+	glRasterPos2f( -512.0f*2.0f/3.0f, 768.0f/3.0f+100.0f );
+	glPrint("Back Face");
 	
-
 	/* Draw it to the screen */
 	SDL_GL_SwapBuffers( );
 
@@ -225,9 +373,6 @@ int drawGLScene( )
 		T0 = t;
 		Frames = 0;
 	}
-	
-	/* rotate axes */
-	rquad -=0.15f;
 
 	return( TRUE );
 }
@@ -296,8 +441,7 @@ int main( int argc, char **argv )
 	/* resize the initial window */
 	resizeWindow( SCREEN_WIDTH, SCREEN_HEIGHT );
 	
-	
-	
+		
 	/* initialise connection to RPi */
 	#if defined (_WIN32) || defined( _WIN64)
 		#define DEVICE_PORT "COM1"			// COM1 for windows
@@ -362,9 +506,8 @@ int main( int argc, char **argv )
 		
 		if (ret == ERR_GOTREADING) 
 		{
-			for (int i=0; i<6; i++) 
+			/*for (int i=0; i<6; i++) 
 			{
-				//std::cout << "RPi_Dev" << i << ": x " << std::setprecision(2) << std::setw(8) << readings[i].x << " y " << readings[i].y << " z " << readings[i].z << 
 				printf("RPi_Dev%d: ts %ld x %6.0f y %6.0f z %6.0f vx %6.0f vy %6.0f vz %6.0f ax %6.0f ay %6.0f az %6.0f temp %6.0f ox %6.0f oy %6.0f oz %6.0f wx %6.0f wy %6.0f wz %6.0f\n",
 					i,
 					readings[i].timestamp,
@@ -374,10 +517,17 @@ int main( int argc, char **argv )
 					readings[i].temp,
 					readings[i].o_x, readings[i].o_y, readings[i].o_z,
 					readings[i].w_x, readings[i].w_y, readings[i].w_z);
-			}			
-		}			
+			}*/
+						
+		}
+		else
+		{
+			/* if we don't have a reading, try to set mode */
+			rpi_mpu_dev->writeString("0\n");			
+			printf("could not get reading\n");		
+		}
 		
-		drawGLScene( );
+		drawGLScene( readings );
 	}
 
 	/* clean ourselves up and exit */
